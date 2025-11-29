@@ -246,6 +246,54 @@ cat >> $HOME/.config/lvim/config.lua << EOL
 vim.g.python3_host_prog = '$HOME/.pyenv/versions/$last_python_ver/bin/python3'
 -- Disable Perl provider (not needed)
 vim.g.loaded_perl_provider = 0
+
+lvim.builtin.dap.active = true
+
+local dap = require("dap")
+-- Function key mappings for DAP
+lvim.keys.normal_mode["<F5>"] = "<cmd>lua require'dap'.continue()<CR>"
+lvim.keys.normal_mode["<F6>"] = "<cmd>lua require'dap'.step_over()<CR>"
+lvim.keys.normal_mode["<F7>"] = "<cmd>lua require'dap'.step_into()<CR>"
+lvim.keys.normal_mode["<F8>"] = "<cmd>lua require'dap'.step_out()<CR>"
+lvim.keys.normal_mode["<F9>"] = "<cmd>lua require'dap'.toggle_breakpoint()<CR>"
+lvim.keys.normal_mode["<F10>"] = "<cmd>lua require'dap'.set_breakpoint(vim.fn.input('Breakpoint condition: '))<CR>"
+lvim.keys.normal_mode["<F12>"] = "<cmd>lua require'dap.ui.widgets'.hover()<CR>"
+
+-- Additional useful mappings
+
+lvim.keys.normal_mode["<F4>"] = "<cmd>lua require'dap'.terminate()<CR>"
+-- Setup DAP after it loads
+
+lvim.builtin.dap.on_config_done = function(dap)
+  local mason_registry = require("mason-registry")
+  local codelldb = mason_registry.get_package("codelldb")
+  local extension_path = codelldb:get_install_path() .. "/extension/"
+  local codelldb_path = extension_path .. "adapter/codelldb"
+  
+  dap.adapters.codelldb = {
+    type = 'server',
+    port = "${port}",
+    executable = {
+      command = codelldb_path,
+      args = {"--port", "${port}"},
+    }
+  }
+  
+  dap.configurations.cpp = {
+    {
+      name = "Launch file",
+      type = "codelldb",
+      request = "launch",
+      program = function()
+        return vim.fn.input('Path to executable: ', vim.fn.getcwd() .. '/', 'file')
+      end,
+      cwd = '${workspaceFolder}',
+      stopOnEntry = false,
+    },
+  }
+  
+  dap.configurations.c = dap.configurations.cpp
+end
 EOL
 
 log_success "LunarVim configuration updated"
