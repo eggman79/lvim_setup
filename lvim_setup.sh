@@ -124,7 +124,7 @@ check_status "pyenv configuration verification"
 
 # Find and install the latest stable Python version
 log_info "Finding latest Python version..."
-last_python_ver=`pyenv install --list|egrep '^\s*[0-9]'|grep -v [a-z]|tail -n1|sed 's/ //g'`
+last_python_ver=`pyenv install --list|egrep '^\s*3.13'|grep -v [a-z]|tail -n1|sed 's/ //g'`
 
 # Validate that we found a Python version
 if [ "$last_python_ver" == "" ]; then
