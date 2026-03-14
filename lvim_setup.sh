@@ -76,7 +76,7 @@ check_status "Package upgrade"
 
 # Install all required system dependencies for building Python, Node.js, and other tools (non-interactive)
 log_info "Installing system dependencies..."
-apt install -y -qq tmux git curl g++ cmake automake vim zlib1g-dev libssl-dev openssl bzip2 libbz2-dev libncurses5-dev libncursesw5-dev libffi-dev libreadline-dev sqlite3 libsqlite3-dev liblzma-dev ruby-full fontconfig sudo
+apt install -y -qq tmux git curl g++ cmake automake vim zlib1g-dev libssl-dev openssl bzip2 libbz2-dev libncurses5-dev libncursesw5-dev libffi-dev libreadline-dev sqlite3 libsqlite3-dev liblzma-dev ruby-full fontconfig sudo wget
 check_status "System dependencies installation"
 
 # Set C++ compiler environment variable (required for some Python packages)
