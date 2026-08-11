@@ -67,16 +67,16 @@ log_info "Step 1: Updating system packages and installing dependencies..."
 
 # Update package lists and upgrade existing packages (non-interactive)
 log_info "Updating package repositories..."
-apt update -qq
+sudo apt update -qq
 check_status "Package repository update"
 
 log_info "Upgrading existing packages..."
-apt upgrade -y -qq
+sudo apt upgrade -y -qq
 check_status "Package upgrade"
 
 # Install all required system dependencies for building Python, Node.js, and other tools (non-interactive)
 log_info "Installing system dependencies..."
-apt install -y -qq tmux git curl g++ cmake automake vim zlib1g-dev libssl-dev openssl bzip2 libbz2-dev libncurses5-dev libncursesw5-dev libffi-dev libreadline-dev sqlite3 libsqlite3-dev liblzma-dev ruby-full fontconfig sudo wget
+sudo apt install -y -qq tmux git curl g++ cmake automake vim zlib1g-dev libssl-dev openssl bzip2 libbz2-dev libncurses5-dev libncursesw5-dev libffi-dev libreadline-dev sqlite3 libsqlite3-dev liblzma-dev ruby-full fontconfig sudo wget
 check_status "System dependencies installation"
 
 # Set C++ compiler environment variable (required for some Python packages)
@@ -208,7 +208,7 @@ nvim_zip=nvim-linux64.tar.gz
 
 # Download Neovim stable release
 log_info "Downloading Neovim v0.9.5..."
-curl -LO https://github.com/neovim/neovim/releases/download/v0.9.5/$nvim_zip
+curl -LO https://github.com/neovim/neovim/releases/download/0.9.5/$nvim_zip
 check_status "Neovim download"
 
 # Remove any existing Neovim installation
