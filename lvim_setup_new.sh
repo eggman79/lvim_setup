@@ -51,10 +51,6 @@ fatal() {
 
 trap 'fatal "Błąd w linii $LINENO: $BASH_COMMAND"' ERR
 
-if [[ "$(id -u)" -eq 0 ]]; then
-    fatal "Uruchom skrypt jako zwykły użytkownik, nie jako root."
-fi
-
 if ! command -v sudo >/dev/null 2>&1; then
     fatal "Brak programu sudo."
 fi
@@ -331,7 +327,9 @@ PYTHON_PATH_LUA="${PYTHON_BIN//\\/\\\\}"
 cat > "$CONFIG_FILE" <<LUA
 -- BEGIN managed installer config
 
-vim.g.python3_host_prog = "$PYTHON_PATH_LUA"
+-- Set this only if PYTHON_PATH_LUA is expanded by your installer/environment.
+-- Otherwise replace it with the absolute path to the Python interpreter.
+vim.g.python3_host_prog = os.getenv("PYTHON_PATH_LUA") or vim.g.python3_host_prog
 
 -- Perl provider is not required.
 vim.g.loaded_perl_provider = 0
@@ -344,71 +342,62 @@ lvim.builtin.mason.ensure_installed = {
   "codelldb",
 }
 
--- Configure C/C++ debugging.
+-- Configure C/C++ debugging after LunarVim has initialized DAP.
 lvim.builtin.dap.on_config_done = function(dap)
   local registry = require("mason-registry")
   local package = registry.get_package("codelldb")
+
+  if not package:is_installed() then
+    vim.notify(
+      "codelldb is not installed. Run :MasonInstall codelldb and retry.",
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
   local extension = package:get_install_path() .. "/extension/"
   local adapter = extension .. "adapter/codelldb"
 
   dap.adapters.codelldb = {
     type = "server",
-    port = "\${port}",
+    port = "${port}",
     executable = {
       command = adapter,
       args = {
         "--port",
-        "\${port}",
+        "${port}",
       },
     },
   }
 
-  dap.configurations.cpp = {
-    {
-      name = "Launch file",
-      type = "codelldb",
-      request = "launch",
-
-      program = function()
-        return vim.fn.input(
-          "Path to executable: ",
-          vim.fn.getcwd() .. "/",
-          "file"
-        )
-      end,
-
-      cwd = "\${workspaceFolder}",
-      stopOnEntry = false,
-    },
+  local cpp_config = {
+    name = "Launch file",
+    type = "codelldb",
+    request = "launch",
+    program = function()
+      return vim.fn.input(
+        "Path to executable: ",
+        vim.fn.getcwd() .. "/",
+        "file"
+      )
+    end,
+    cwd = "${workspaceFolder}",
+    stopOnEntry = false,
   }
 
-  dap.configurations.c = dap.configurations.cpp
+  dap.configurations.cpp = { cpp_config }
+  dap.configurations.c = { cpp_config }
 end
 
 -- DAP key mappings.
-lvim.keys.normal_mode["<F4>"] =
-  "<cmd>lua require('dap').terminate()<CR>"
-
-lvim.keys.normal_mode["<F5>"] =
-  "<cmd>lua require('dap').continue()<CR>"
-
-lvim.keys.normal_mode["<F6>"] =
-  "<cmd>lua require('dap').step_over()<CR>"
-
-lvim.keys.normal_mode["<F7>"] =
-  "<cmd>lua require('dap').step_into()<CR>"
-
-lvim.keys.normal_mode["<F8>"] =
-  "<cmd>lua require('dap').step_out()<CR>"
-
-lvim.keys.normal_mode["<F9>"] =
-  "<cmd>lua require('dap').toggle_breakpoint()<CR>"
-
-lvim.keys.normal_mode["<F10>"] =
-  "<cmd>lua require('dap').set_breakpoint(vim.fn.input('Breakpoint condition: '))<CR>"
-
-lvim.keys.normal_mode["<F12>"] =
-  "<cmd>lua require('dap.ui.widgets').hover()<CR>"
+lvim.keys.normal_mode["<F5>"] = "<cmd>lua require('dap').continue()<CR>"
+lvim.keys.normal_mode["<F6>"] = "<cmd>lua require('dap').terminate()<CR>"
+lvim.keys.normal_mode["<F10>"] = "<cmd>lua require('dap').step_over()<CR>"
+lvim.keys.normal_mode["<F11>"] = "<cmd>lua require('dap').step_into()<CR>"
+lvim.keys.normal_mode["<F12>"] = "<cmd>lua require('dap').step_out()<CR>"
+lvim.keys.normal_mode["<leader>b"] = "<cmd>lua require('dap').toggle_breakpoint()<CR>"
+lvim.keys.normal_mode["<leader>B"] = "<cmd>lua require('dap').set_breakpoint(vim.fn.input('Breakpoint condition: '))<CR>"
+lvim.keys.normal_mode["<leader>dh"] = "<cmd>lua require('dap.ui.widgets').hover()<CR>"
 
 -- END managed installer config
 LUA
