@@ -360,12 +360,12 @@ lvim.builtin.dap.on_config_done = function(dap)
 
   dap.adapters.codelldb = {
     type = "server",
-    port = "${port}",
+    port = "\${port}",
     executable = {
       command = adapter,
       args = {
         "--port",
-        "${port}",
+        "\${port}",
       },
     },
   }
@@ -381,7 +381,7 @@ lvim.builtin.dap.on_config_done = function(dap)
         "file"
       )
     end,
-    cwd = "${workspaceFolder}",
+    cwd = "\${workspaceFolder}",
     stopOnEntry = false,
   }
 
