@@ -106,8 +106,8 @@ sudo apt-get install -y -qq \
     ruby-full \
     clang \
     lldb \
-    rr
-
+    rr \
+    radare2
 ok "Zależności systemowe zainstalowane."
 
 ###############################################################################
