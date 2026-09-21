@@ -105,7 +105,8 @@ sudo apt-get install -y -qq \
     ca-certificates \
     ruby-full \
     clang \
-    lldb
+    lldb \
+    rr
 
 ok "Zależności systemowe zainstalowane."
 
