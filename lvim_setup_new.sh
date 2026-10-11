@@ -3,13 +3,15 @@ set -Eeuo pipefail
 
 # LunarVim 1.4 installer for Debian/Ubuntu.
 #
-# Domyślnie instaluje NAJNOWSZE stabilne wydanie Neovim (GitHub "latest").
+# Domyślnie instaluje Neovim 0.10.4 - najnowszą wersję, z którą LunarVim
+# działa bez błędów (nvim-treesitter w LunarVim jest przypięty do starego
+# commita, który nie działa z Neovim 0.11+).
 #
 # Przykłady:
-#   bash ./lvim_setup_new.sh                        # najnowszy stabilny Neovim
-#   NVIM_VERSION=nightly bash ./lvim_setup_new.sh   # build nightly
-#   NVIM_VERSION=0.10.4 bash ./lvim_setup_new.sh    # konkretna wersja
-#   NVIM_VERSION=0.9.5 bash ./lvim_setup_new.sh     # stara, w pełni wspierana przez LunarVim 1.4
+#   bash ./lvim_setup_new.sh                        # Neovim 0.10.4 + LunarVim master
+#   NVIM_VERSION=0.9.5 bash ./lvim_setup_new.sh     # oficjalnie wspierane przez LunarVim 1.4
+#   NVIM_VERSION=latest bash ./lvim_setup_new.sh    # najnowszy Neovim (mogą być błędy pluginów!)
+#   NVIM_VERSION=nightly bash ./lvim_setup_new.sh   # build nightly (jw.)
 #
 # LV_BRANCH (opcjonalnie): jeśli nie podano, wybierane automatycznie:
 #   Neovim 0.9.x -> release-1.4/neovim-0.9, w pozostałych przypadkach -> master
@@ -18,7 +20,7 @@ export DEBIAN_FRONTEND=noninteractive
 export APT_LISTCHANGES_FRONTEND=none
 
 LV_BRANCH="${LV_BRANCH:-}"
-NVIM_VERSION="${NVIM_VERSION:-latest}"
+NVIM_VERSION="${NVIM_VERSION:-0.10.4}"
 PYTHON_MINOR="${PYTHON_MINOR:-3.13}"
 INSTALL_FONTS="${INSTALL_FONTS:-1}"
 
@@ -96,6 +98,7 @@ sudo apt-get install -y -qq \
     ripgrep \
     fzf \
     xclip \
+    wl-clipboard \
     fontconfig \
     zlib1g-dev \
     libssl-dev \
@@ -377,10 +380,15 @@ if [[ -z "$LV_BRANCH" ]]; then
     esac
 fi
 
-if [[ "$LV_BRANCH" == "master" ]]; then
-    warn "LunarVim (master) z Neovim ${NVIM_TAG} nie jest oficjalnie stabilny."
-    warn "Mogą pojawiać się ostrzeżenia o przestarzałych API lub błędy pluginów."
-fi
+case "$NVIM_TAG" in
+    v0.9.*|v0.10.*)
+        ;;
+    *)
+        warn "Neovim ${NVIM_TAG} jest nowszy niż 0.10 - LunarVim z nim nie działa poprawnie."
+        warn "Typowy objaw: błędy nvim-treesitter (query_predicates.lua ... 'type' (a nil value))."
+        warn "Jeśli je zobaczysz, uruchom ponownie z NVIM_VERSION=0.10.4."
+        ;;
+esac
 
 ###############################################################################
 # STEP 7: LunarVim
@@ -574,10 +582,47 @@ lvim.builtin.which_key.vmappings["a"] = {
   s = { "<cmd>ClaudeCodeSend<cr>", "Send selection to Claude" },
 }
 
+-- Schowek systemowy.
+-- Na maszynie bez środowiska graficznego (SSH, serwer, kontener) kopiowanie
+-- działa przez sekwencję OSC 52, którą przekazuje terminal użytkownika.
+-- Wymaga Neovim >= 0.10 oraz terminala obsługującego OSC 52
+-- (Windows Terminal, kitty, WezTerm, iTerm2, Alacritty).
+local function has_value(v)
+  return v ~= nil and v ~= ""
+end
+
+local has_display = has_value(vim.env.DISPLAY) or has_value(vim.env.WAYLAND_DISPLAY)
+local use_osc52 = (has_value(vim.env.SSH_TTY) or not has_display)
+  and vim.fn.has("wsl") == 0
+  and vim.fn.has("nvim-0.10") == 1
+
+if use_osc52 then
+  local osc52 = require("vim.ui.clipboard.osc52")
+
+  local function paste_from_register()
+    return { vim.fn.split(vim.fn.getreg(""), "\n"), vim.fn.getregtype("") }
+  end
+
+  vim.g.clipboard = {
+    name = "OSC 52",
+    copy = {
+      ["+"] = osc52.copy("+"),
+      ["*"] = osc52.copy("*"),
+    },
+    paste = {
+      ["+"] = paste_from_register,
+      ["*"] = paste_from_register,
+    },
+  }
+end
+
 -- END managed installer config
 LUA
 
 ok "Konfiguracja LunarVim zapisana w $CONFIG_FILE."
+
+# tmux: przekazuj schowek (OSC 52) do terminala użytkownika.
+append_once 'set -g set-clipboard on' "$HOME/.tmux.conf"
 
 ###############################################################################
 # STEP 9: Nerd Font
