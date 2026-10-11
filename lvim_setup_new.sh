@@ -3,17 +3,22 @@ set -Eeuo pipefail
 
 # LunarVim 1.4 installer for Debian/Ubuntu.
 #
-# Stable defaults are intentionally pinned to the official
-# LunarVim 1.4 / Neovim 0.9 branch.
+# Domyślnie instaluje NAJNOWSZE stabilne wydanie Neovim (GitHub "latest").
 #
-# Override when needed, for example:
-#   LV_BRANCH=master NVIM_VERSION=0.10.4 bash ./lvim_installer_fixed.sh
+# Przykłady:
+#   bash ./lvim_setup_new.sh                        # najnowszy stabilny Neovim
+#   NVIM_VERSION=nightly bash ./lvim_setup_new.sh   # build nightly
+#   NVIM_VERSION=0.10.4 bash ./lvim_setup_new.sh    # konkretna wersja
+#   NVIM_VERSION=0.9.5 bash ./lvim_setup_new.sh     # stara, w pełni wspierana przez LunarVim 1.4
+#
+# LV_BRANCH (opcjonalnie): jeśli nie podano, wybierane automatycznie:
+#   Neovim 0.9.x -> release-1.4/neovim-0.9, w pozostałych przypadkach -> master
 
 export DEBIAN_FRONTEND=noninteractive
 export APT_LISTCHANGES_FRONTEND=none
 
-LV_BRANCH="${LV_BRANCH:-release-1.4/neovim-0.9}"
-NVIM_VERSION="${NVIM_VERSION:-0.9.5}"
+LV_BRANCH="${LV_BRANCH:-}"
+NVIM_VERSION="${NVIM_VERSION:-latest}"
 PYTHON_MINOR="${PYTHON_MINOR:-3.13}"
 INSTALL_FONTS="${INSTALL_FONTS:-1}"
 
@@ -192,6 +197,14 @@ if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
         bash
 fi
 
+# nvm jest niezgodny z ustawieniami prefix/globalconfig w ~/.npmrc
+# (poprzednie wersje tego skryptu ustawiały prefix, co psuje nvm).
+if [[ -f "$HOME/.npmrc" ]]; then
+    sed -i -E '/^[[:space:]]*(prefix|globalconfig)[[:space:]]*=/d' "$HOME/.npmrc"
+fi
+
+unset npm_config_prefix NPM_CONFIG_PREFIX
+
 # shellcheck source=/dev/null
 source "$NVM_DIR/nvm.sh"
 
@@ -200,8 +213,8 @@ info "Instalowanie najnowszego wydania LTS Node.js..."
 nvm install --lts >/dev/null
 nvm alias default 'lts/*' >/dev/null
 
-# Avoid permission problems with global npm packages.
-npm config set prefix "$HOME/.local"
+# Uwaga: nie ustawiamy "npm config set prefix" - nvm instaluje pakiety globalne
+# w katalogu użytkownika, więc nie ma problemów z uprawnieniami.
 
 npm install --global neovim
 npm install --global tree-sitter-cli
@@ -234,13 +247,11 @@ ok "Rust zainstalowany."
 
 case "$(uname -m)" in
     x86_64)
-        NVIM_ARCHIVE="nvim-linux64.tar.gz"
-        NVIM_DIR="nvim-linux64"
+        NVIM_ARCH="x86_64"
         ;;
 
     aarch64|arm64)
-        NVIM_ARCHIVE="nvim-linux-arm64.tar.gz"
-        NVIM_DIR="nvim-linux-arm64"
+        NVIM_ARCH="arm64"
         ;;
 
     *)
@@ -248,7 +259,42 @@ case "$(uname -m)" in
         ;;
 esac
 
-info "Instalowanie Neovim v${NVIM_VERSION}..."
+resolve_nvim_tag() {
+    local requested="$1"
+    local url
+
+    case "$requested" in
+        latest)
+            # /releases/latest przekierowuje na tag najnowszego stabilnego wydania.
+            url="$(
+                curl -fsSL \
+                    --retry 3 \
+                    -o /dev/null \
+                    -w '%{url_effective}' \
+                    https://github.com/neovim/neovim/releases/latest
+            )"
+            printf '%s\n' "${url##*/}"
+            ;;
+
+        nightly)
+            printf 'nightly\n'
+            ;;
+
+        *)
+            printf 'v%s\n' "${requested#v}"
+            ;;
+    esac
+}
+
+info "Ustalanie wersji Neovim (${NVIM_VERSION})..."
+
+NVIM_TAG="$(resolve_nvim_tag "$NVIM_VERSION")"
+
+if [[ ! "$NVIM_TAG" =~ ^(v[0-9]+\.[0-9]+\.[0-9]+|nightly)$ ]]; then
+    fatal "Nieprawidłowa wersja Neovim: ${NVIM_TAG}"
+fi
+
+info "Instalowanie Neovim ${NVIM_TAG}..."
 
 TMP_DIR="$(mktemp -d)"
 
@@ -258,32 +304,83 @@ cleanup() {
 
 trap cleanup EXIT
 
-curl \
-    -fL \
-    --retry 3 \
-    -o "$TMP_DIR/$NVIM_ARCHIVE" \
-    "https://github.com/neovim/neovim/releases/download/v${NVIM_VERSION}/${NVIM_ARCHIVE}"
+# Nazwy archiwów zmieniały się między wydaniami:
+#   nowe:   nvim-linux-x86_64.tar.gz / nvim-linux-arm64.tar.gz
+#   starsze: nvim-linux64.tar.gz (tylko x86_64)
+ARCHIVE_CANDIDATES=("nvim-linux-${NVIM_ARCH}.tar.gz")
+
+if [[ "$NVIM_ARCH" == "x86_64" ]]; then
+    ARCHIVE_CANDIDATES+=("nvim-linux64.tar.gz")
+fi
+
+NVIM_ARCHIVE=""
+
+for candidate in "${ARCHIVE_CANDIDATES[@]}"; do
+    if curl \
+        -fL \
+        --retry 3 \
+        -o "$TMP_DIR/$candidate" \
+        "https://github.com/neovim/neovim/releases/download/${NVIM_TAG}/${candidate}"; then
+        NVIM_ARCHIVE="$candidate"
+        break
+    fi
+
+    warn "Brak archiwum ${candidate} dla ${NVIM_TAG}, próbuję następny wariant..."
+done
+
+[[ -n "$NVIM_ARCHIVE" ]] ||
+    fatal "Nie udało się pobrać Neovim ${NVIM_TAG} dla architektury $(uname -m)."
+
+mkdir -p "$TMP_DIR/extract"
 
 tar \
-    -C "$TMP_DIR" \
+    -C "$TMP_DIR/extract" \
     -xzf "$TMP_DIR/$NVIM_ARCHIVE"
 
+# Nazwa katalogu w archiwum zależy od wydania, więc wykrywamy ją automatycznie.
+EXTRACTED=("$TMP_DIR"/extract/*/)
+NVIM_DIR="$(basename "${EXTRACTED[0]}")"
+
+[[ -d "$TMP_DIR/extract/$NVIM_DIR/bin" ]] ||
+    fatal "Nieoczekiwana zawartość archiwum Neovim."
+
 sudo rm -rf "/opt/$NVIM_DIR"
-sudo mv "$TMP_DIR/$NVIM_DIR" "/opt/$NVIM_DIR"
+sudo mv "$TMP_DIR/extract/$NVIM_DIR" "/opt/$NVIM_DIR"
 
 sudo ln -sfn \
     "/opt/$NVIM_DIR/bin/nvim" \
     /usr/local/bin/nvim
 
+hash -r
+
 if ! command -v nvim >/dev/null 2>&1; then
     fatal "Nie znaleziono polecenia nvim po instalacji."
 fi
 
-if [[ "$(nvim --version | head -n1)" != *"v${NVIM_VERSION}"* ]]; then
-    fatal "Nieprawidłowa wersja Neovim w PATH."
+NVIM_VERSION_LINE="$(nvim --version | sed -n '1p')"
+
+if [[ "$NVIM_TAG" != "nightly" && "$NVIM_VERSION_LINE" != *"${NVIM_TAG}"* ]]; then
+    fatal "Nieprawidłowa wersja Neovim w PATH: ${NVIM_VERSION_LINE} (oczekiwano ${NVIM_TAG})."
 fi
 
-ok "Neovim v${NVIM_VERSION} zainstalowany."
+ok "Zainstalowano: ${NVIM_VERSION_LINE}"
+
+# Wybór gałęzi LunarVim dopasowanej do Neovim.
+if [[ -z "$LV_BRANCH" ]]; then
+    case "$NVIM_TAG" in
+        v0.9.*)
+            LV_BRANCH="release-1.4/neovim-0.9"
+            ;;
+        *)
+            LV_BRANCH="master"
+            ;;
+    esac
+fi
+
+if [[ "$LV_BRANCH" == "master" ]]; then
+    warn "LunarVim (master) z Neovim ${NVIM_TAG} nie jest oficjalnie stabilny."
+    warn "Mogą pojawiać się ostrzeżenia o przestarzałych API lub błędy pluginów."
+fi
 
 ###############################################################################
 # STEP 7: LunarVim
@@ -302,6 +399,29 @@ if ! command -v lvim >/dev/null 2>&1; then
 fi
 
 ok "LunarVim zainstalowany."
+
+###############################################################################
+# STEP 7b: Claude Code CLI
+###############################################################################
+
+info "Instalowanie Claude Code CLI..."
+
+export PATH="$HOME/.local/bin:$PATH"
+
+if command -v claude >/dev/null 2>&1; then
+    ok "Claude Code jest już zainstalowany: $(claude --version 2>/dev/null || echo 'nieznana wersja')"
+else
+    # Natywny instalator (zalecany): nie wymaga Node.js, instaluje do ~/.local/bin/claude
+    curl -fsSL https://claude.ai/install.sh | bash
+
+    hash -r
+
+    if ! command -v claude >/dev/null 2>&1; then
+        fatal "Instalator nie utworzył polecenia claude (oczekiwano ~/.local/bin/claude)."
+    fi
+
+    ok "Claude Code zainstalowany: $(claude --version 2>/dev/null || echo 'nieznana wersja')"
+fi
 
 ###############################################################################
 # STEP 8: LunarVim configuration
@@ -328,9 +448,8 @@ PYTHON_PATH_LUA="${PYTHON_BIN//\\/\\\\}"
 cat > "$CONFIG_FILE" <<LUA
 -- BEGIN managed installer config
 
--- Set this only if PYTHON_PATH_LUA is expanded by your installer/environment.
--- Otherwise replace it with the absolute path to the Python interpreter.
-vim.g.python3_host_prog = os.getenv("PYTHON_PATH_LUA") or vim.g.python3_host_prog
+-- Python provider (interpreter installed by pyenv).
+vim.g.python3_host_prog = "${PYTHON_PATH_LUA}"
 
 -- Perl provider is not required.
 vim.g.loaded_perl_provider = 0
@@ -400,6 +519,61 @@ lvim.keys.normal_mode["<leader>b"] = "<cmd>lua require('dap').toggle_breakpoint(
 lvim.keys.normal_mode["<leader>B"] = "<cmd>lua require('dap').set_breakpoint(vim.fn.input('Breakpoint condition: '))<CR>"
 lvim.keys.normal_mode["<leader>dh"] = "<cmd>lua require('dap.ui.widgets').hover()<CR>"
 
+-- Claude Code integration (coder/claudecode.nvim)
+-- Używa wbudowanego terminala Neovim ("native"), więc nie wymaga snacks.nvim.
+local claude_bin = vim.fn.expand("~/.local/bin/claude")
+
+lvim.plugins = vim.list_extend(lvim.plugins or {}, {
+  {
+    "coder/claudecode.nvim",
+    cmd = {
+      "ClaudeCode",
+      "ClaudeCodeFocus",
+      "ClaudeCodeSelectModel",
+      "ClaudeCodeAdd",
+      "ClaudeCodeSend",
+      "ClaudeCodeTreeAdd",
+      "ClaudeCodeStatus",
+      "ClaudeCodeStart",
+      "ClaudeCodeStop",
+      "ClaudeCodeOpen",
+      "ClaudeCodeClose",
+      "ClaudeCodeDiffAccept",
+      "ClaudeCodeDiffDeny",
+      "ClaudeCodeCloseAllDiffs",
+    },
+    opts = {
+      -- Pełna ścieżka, żeby działało także gdy PATH w lvim nie zawiera ~/.local/bin.
+      terminal_cmd = vim.fn.executable(claude_bin) == 1 and claude_bin or nil,
+      terminal = {
+        provider = "native",
+        split_side = "right",
+        split_width_percentage = 0.35,
+      },
+    },
+    config = true,
+  },
+})
+
+-- Klawisze: <leader>a (Space a) = Claude Code
+lvim.builtin.which_key.mappings["a"] = {
+  name = "Claude Code",
+  c = { "<cmd>ClaudeCode<cr>", "Toggle Claude" },
+  f = { "<cmd>ClaudeCodeFocus<cr>", "Focus Claude" },
+  r = { "<cmd>ClaudeCode --resume<cr>", "Resume session" },
+  C = { "<cmd>ClaudeCode --continue<cr>", "Continue session" },
+  m = { "<cmd>ClaudeCodeSelectModel<cr>", "Select model" },
+  b = { "<cmd>ClaudeCodeAdd %<cr>", "Add current buffer" },
+  a = { "<cmd>ClaudeCodeDiffAccept<cr>", "Accept diff" },
+  d = { "<cmd>ClaudeCodeDiffDeny<cr>", "Deny diff" },
+  s = { "<cmd>ClaudeCodeStatus<cr>", "Status" },
+}
+
+lvim.builtin.which_key.vmappings["a"] = {
+  name = "Claude Code",
+  s = { "<cmd>ClaudeCodeSend<cr>", "Send selection to Claude" },
+}
+
 -- END managed installer config
 LUA
 
@@ -448,6 +622,16 @@ info "Pierwsza synchronizacja pluginów LunarVim..."
 
 ok "Synchronizacja pluginów zakończona."
 
+info "Instalowanie pluginów użytkownika (claudecode.nvim)..."
+
+"$HOME/.local/bin/lvim" \
+    --headless \
+    '+Lazy! sync' \
+    +qa ||
+    warn "Nie udało się zsynchronizować pluginów użytkownika; uruchom :Lazy sync w lvim."
+
+ok "Pluginy użytkownika zainstalowane."
+
 ###############################################################################
 # Summary
 ###############################################################################
@@ -457,7 +641,7 @@ cat <<EOF
 Instalacja zakończona.
 
   LunarVim: ${LV_BRANCH}
-  Neovim:   ${NVIM_VERSION}
+  Neovim:   ${NVIM_TAG}
   Python:   ${PYTHON_VERSION}
 
 Uruchom nową sesję powłoki albo wykonaj:
@@ -473,6 +657,17 @@ Przydatne polecenia w LunarVim:
   :checkhealth
   :checkhealth provider
   :Mason
+
+Claude Code w LunarVim:
+
+  1. W terminalu uruchom raz:  claude   (zaloguj się kontem Claude lub kluczem API)
+  2. W lvim:  :ClaudeCode  lub  <Space>ac
+  3. Diagnostyka:  :checkhealth claudecode
+
+  <Space>ac  przełącz Claude        <Space>af  fokus
+  <Space>ar  wznów sesję            <Space>aC  kontynuuj sesję
+  <Space>ab  dodaj bieżący bufor    <Space>as  (tryb visual) wyślij zaznaczenie
+  <Space>aa  akceptuj diff          <Space>ad  odrzuć diff
 
 Jeżeli codelldb nie zostanie zainstalowany automatycznie:
 
