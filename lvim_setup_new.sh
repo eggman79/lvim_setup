@@ -662,6 +662,13 @@ if use_osc52 then
   }
 end
 
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "cmake",
+  callback = function()
+    vim.cmd("IndentBlanklineDisable")
+  end,
+})
+
 -- END managed installer config
 LUA
 
