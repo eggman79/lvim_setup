@@ -3,26 +3,34 @@ set -Eeuo pipefail
 
 # LunarVim 1.4 installer for Debian/Ubuntu.
 #
-# Domyślnie instaluje Neovim 0.10.4 - najnowszą wersję, z którą LunarVim
-# działa bez błędów (nvim-treesitter w LunarVim jest przypięty do starego
-# commita, który nie działa z Neovim 0.11+).
+# Domyślnie instaluje Neovim 0.11.7. LunarVim przypina nvim-treesitter do
+# starego commita, który nie działa z Neovim 0.11+, dlatego skrypt po
+# instalacji aktualizuje nvim-treesitter do najnowszego master i go przypina
+# (patrz STEP 8 i STEP 11).
+# Integracja AI: Groq (przez codecompanion.nvim, API zgodne z OpenAI).
 #
 # Przykłady:
-#   bash ./lvim_setup_new.sh                        # Neovim 0.10.4 + LunarVim master
-#   NVIM_VERSION=0.9.5 bash ./lvim_setup_new.sh     # oficjalnie wspierane przez LunarVim 1.4
-#   NVIM_VERSION=latest bash ./lvim_setup_new.sh    # najnowszy Neovim (mogą być błędy pluginów!)
-#   NVIM_VERSION=nightly bash ./lvim_setup_new.sh   # build nightly (jw.)
+#   bash ./lvim_setup_fixed.sh                        # Neovim 0.11.7 + LunarVim master
+#   NVIM_VERSION=0.10.4 bash ./lvim_setup_fixed.sh    # ostatnia w pełni bezproblemowa
+#   NVIM_VERSION=0.9.5 bash ./lvim_setup_fixed.sh     # oficjalnie wspierane przez LunarVim 1.4
+#   NVIM_VERSION=latest bash ./lvim_setup_fixed.sh    # najnowszy Neovim (0.12+ może psuć pluginy!)
+#   NVIM_VERSION=nightly bash ./lvim_setup_fixed.sh   # build nightly (jw.)
+#   GROQ_MODEL=openai/gpt-oss-20b bash ./lvim_setup_fixed.sh   # inny model Groq
 #
 # LV_BRANCH (opcjonalnie): jeśli nie podano, wybierane automatycznie:
 #   Neovim 0.9.x -> release-1.4/neovim-0.9, w pozostałych przypadkach -> master
+#
+# Klucz API Groq: ustaw zmienną środowiskową GROQ_API_KEY (np. w ~/.bashrc).
+# Klucz tworzysz na https://console.groq.com/keys
 
 export DEBIAN_FRONTEND=noninteractive
 export APT_LISTCHANGES_FRONTEND=none
 
 LV_BRANCH="${LV_BRANCH:-}"
-NVIM_VERSION="${NVIM_VERSION:-0.10.4}"
+NVIM_VERSION="${NVIM_VERSION:-0.11.7}"
 PYTHON_MINOR="${PYTHON_MINOR:-3.13}"
 INSTALL_FONTS="${INSTALL_FONTS:-1}"
+GROQ_MODEL="${GROQ_MODEL:-openai/gpt-oss-120b}"
 
 readonly BLUE='\033[0;34m'
 readonly GREEN='\033[0;32m'
@@ -173,6 +181,7 @@ PYTHON_BIN="$PYENV_ROOT/versions/$PYTHON_VERSION/bin/python"
 
 "$PYTHON_BIN" -m pip install --upgrade pip
 "$PYTHON_BIN" -m pip install --upgrade pynvim
+pip install cmake-language-server
 
 ok "Python $PYTHON_VERSION i provider pynvim gotowe."
 
@@ -368,6 +377,15 @@ fi
 
 ok "Zainstalowano: ${NVIM_VERSION_LINE}"
 
+# Neovim 0.11+ (w tym nightly) wymaga aktualizacji nvim-treesitter.
+NEEDS_TS_FIX=1
+
+case "$NVIM_TAG" in
+    v0.9.*|v0.10.*)
+        NEEDS_TS_FIX=0
+        ;;
+esac
+
 # Wybór gałęzi LunarVim dopasowanej do Neovim.
 if [[ -z "$LV_BRANCH" ]]; then
     case "$NVIM_TAG" in
@@ -380,15 +398,10 @@ if [[ -z "$LV_BRANCH" ]]; then
     esac
 fi
 
-case "$NVIM_TAG" in
-    v0.9.*|v0.10.*)
-        ;;
-    *)
-        warn "Neovim ${NVIM_TAG} jest nowszy niż 0.10 - LunarVim z nim nie działa poprawnie."
-        warn "Typowy objaw: błędy nvim-treesitter (query_predicates.lua ... 'type' (a nil value))."
-        warn "Jeśli je zobaczysz, uruchom ponownie z NVIM_VERSION=0.10.4."
-        ;;
-esac
+if [[ "$NEEDS_TS_FIX" == "1" ]]; then
+    warn "Neovim ${NVIM_TAG} jest nowszy niż 0.10 - LunarVim nie jest oficjalnie wspierany."
+    warn "Skrypt zaktualizuje nvim-treesitter do master i go przypnie (STEP 8 i 11)."
+fi
 
 ###############################################################################
 # STEP 7: LunarVim
@@ -407,29 +420,6 @@ if ! command -v lvim >/dev/null 2>&1; then
 fi
 
 ok "LunarVim zainstalowany."
-
-###############################################################################
-# STEP 7b: Claude Code CLI
-###############################################################################
-
-info "Instalowanie Claude Code CLI..."
-
-export PATH="$HOME/.local/bin:$PATH"
-
-if command -v claude >/dev/null 2>&1; then
-    ok "Claude Code jest już zainstalowany: $(claude --version 2>/dev/null || echo 'nieznana wersja')"
-else
-    # Natywny instalator (zalecany): nie wymaga Node.js, instaluje do ~/.local/bin/claude
-    curl -fsSL https://claude.ai/install.sh | bash
-
-    hash -r
-
-    if ! command -v claude >/dev/null 2>&1; then
-        fatal "Instalator nie utworzył polecenia claude (oczekiwano ~/.local/bin/claude)."
-    fi
-
-    ok "Claude Code zainstalowany: $(claude --version 2>/dev/null || echo 'nieznana wersja')"
-fi
 
 ###############################################################################
 # STEP 8: LunarVim configuration
@@ -453,6 +443,12 @@ fi
 
 PYTHON_PATH_LUA="${PYTHON_BIN//\\/\\\\}"
 
+if [[ "$NEEDS_TS_FIX" == "1" ]]; then
+    TS_PIN_LUA="true"
+else
+    TS_PIN_LUA="false"
+fi
+
 cat > "$CONFIG_FILE" <<LUA
 -- BEGIN managed installer config
 
@@ -461,6 +457,31 @@ vim.g.python3_host_prog = "${PYTHON_PATH_LUA}"
 
 -- Perl provider is not required.
 vim.g.loaded_perl_provider = 0
+
+-- Treesitter: parsery instalowane automatycznie.
+lvim.builtin.treesitter.ensure_installed = {
+  "bash",
+  "c",
+  "comment",
+  "cpp",
+  "lua",
+  "markdown_inline",
+  "python",
+  "query",
+  "regex",
+  "vim",
+  "vimdoc",
+}
+
+-- Neovim >= 0.11: nvim-treesitter jest aktualizowany do master przez
+-- instalator, a pin (pin = true) zapobiega cofnięciu go do starego commita
+-- z LunarVim przy :Lazy sync / :LvimSyncCorePlugins.
+lvim.plugins = vim.list_extend(lvim.plugins or {}, {
+  {
+    "nvim-treesitter/nvim-treesitter",
+    pin = ${TS_PIN_LUA},
+  },
+})
 
 -- Enable DAP.
 lvim.builtin.dap.active = true
@@ -527,59 +548,84 @@ lvim.keys.normal_mode["<leader>b"] = "<cmd>lua require('dap').toggle_breakpoint(
 lvim.keys.normal_mode["<leader>B"] = "<cmd>lua require('dap').set_breakpoint(vim.fn.input('Breakpoint condition: '))<CR>"
 lvim.keys.normal_mode["<leader>dh"] = "<cmd>lua require('dap.ui.widgets').hover()<CR>"
 
--- Claude Code integration (coder/claudecode.nvim)
--- Używa wbudowanego terminala Neovim ("native"), więc nie wymaga snacks.nvim.
-local claude_bin = vim.fn.expand("~/.local/bin/claude")
-
-lvim.plugins = vim.list_extend(lvim.plugins or {}, {
-  {
-    "coder/claudecode.nvim",
-    cmd = {
-      "ClaudeCode",
-      "ClaudeCodeFocus",
-      "ClaudeCodeSelectModel",
-      "ClaudeCodeAdd",
-      "ClaudeCodeSend",
-      "ClaudeCodeTreeAdd",
-      "ClaudeCodeStatus",
-      "ClaudeCodeStart",
-      "ClaudeCodeStop",
-      "ClaudeCodeOpen",
-      "ClaudeCodeClose",
-      "ClaudeCodeDiffAccept",
-      "ClaudeCodeDiffDeny",
-      "ClaudeCodeCloseAllDiffs",
-    },
-    opts = {
-      -- Pełna ścieżka, żeby działało także gdy PATH w lvim nie zawiera ~/.local/bin.
-      terminal_cmd = vim.fn.executable(claude_bin) == 1 and claude_bin or nil,
-      terminal = {
-        provider = "native",
-        split_side = "right",
-        split_width_percentage = 0.35,
-      },
-    },
-    config = true,
+-- NASM zamiast domyślnej składni asm.
+vim.g.asmsyntax = "nasm"
+vim.filetype.add({
+  extension = {
+    asm = "nasm",
+    nasm = "nasm",
+    inc = "nasm",
   },
 })
 
--- Klawisze: <leader>a (Space a) = Claude Code
+-- Groq (codecompanion.nvim + adapter openai_compatible).
+-- Klucz API jest czytany ze zmiennej środowiskowej GROQ_API_KEY
+-- (nigdy nie wpisuj go na stałe do tego pliku).
+local groq_model = "${GROQ_MODEL}"
+
+lvim.plugins = vim.list_extend(lvim.plugins or {}, {
+  {
+    "olimorris/codecompanion.nvim",
+    dependencies = {
+      "nvim-lua/plenary.nvim",
+      "nvim-treesitter/nvim-treesitter",
+    },
+    cmd = {
+      "CodeCompanion",
+      "CodeCompanionChat",
+      "CodeCompanionActions",
+      "CodeCompanionCmd",
+    },
+    opts = {
+      adapters = {
+        http = {
+          groq = function()
+            return require("codecompanion.adapters").extend("openai_compatible", {
+              name = "groq",
+              formatted_name = "Groq",
+              env = {
+                url = "https://api.groq.com/openai",
+                api_key = "GROQ_API_KEY",
+                chat_url = "/v1/chat/completions",
+              },
+              schema = {
+                model = {
+                  default = groq_model,
+                },
+              },
+            })
+          end,
+        },
+      },
+      -- Starsze wydania używają klucza "strategies", nowsze "interactions";
+      -- nieznany klucz jest ignorowany, więc ustawiamy oba.
+      strategies = {
+        chat = { adapter = "groq" },
+        inline = { adapter = "groq" },
+        cmd = { adapter = "groq" },
+      },
+      interactions = {
+        chat = { adapter = "groq" },
+        inline = { adapter = "groq" },
+        cmd = { adapter = "groq" },
+      },
+    },
+  },
+})
+
+-- Klawisze: <leader>a (Space a) = AI (Groq)
 lvim.builtin.which_key.mappings["a"] = {
-  name = "Claude Code",
-  c = { "<cmd>ClaudeCode<cr>", "Toggle Claude" },
-  f = { "<cmd>ClaudeCodeFocus<cr>", "Focus Claude" },
-  r = { "<cmd>ClaudeCode --resume<cr>", "Resume session" },
-  C = { "<cmd>ClaudeCode --continue<cr>", "Continue session" },
-  m = { "<cmd>ClaudeCodeSelectModel<cr>", "Select model" },
-  b = { "<cmd>ClaudeCodeAdd %<cr>", "Add current buffer" },
-  a = { "<cmd>ClaudeCodeDiffAccept<cr>", "Accept diff" },
-  d = { "<cmd>ClaudeCodeDiffDeny<cr>", "Deny diff" },
-  s = { "<cmd>ClaudeCodeStatus<cr>", "Status" },
+  name = "AI (Groq)",
+  c = { "<cmd>CodeCompanionChat Toggle<cr>", "Toggle chat" },
+  a = { "<cmd>CodeCompanionActions<cr>", "Actions" },
+  i = { "<cmd>CodeCompanion<cr>", "Inline prompt" },
 }
 
 lvim.builtin.which_key.vmappings["a"] = {
-  name = "Claude Code",
-  s = { "<cmd>ClaudeCodeSend<cr>", "Send selection to Claude" },
+  name = "AI (Groq)",
+  a = { "<cmd>CodeCompanionActions<cr>", "Actions" },
+  i = { "<cmd>CodeCompanion<cr>", "Inline prompt" },
+  s = { "<cmd>CodeCompanionChat Add<cr>", "Send selection to chat" },
 }
 
 -- Schowek systemowy.
@@ -667,7 +713,7 @@ info "Pierwsza synchronizacja pluginów LunarVim..."
 
 ok "Synchronizacja pluginów zakończona."
 
-info "Instalowanie pluginów użytkownika (claudecode.nvim)..."
+info "Instalowanie pluginów użytkownika (codecompanion.nvim)..."
 
 "$HOME/.local/bin/lvim" \
     --headless \
@@ -676,6 +722,40 @@ info "Instalowanie pluginów użytkownika (claudecode.nvim)..."
     warn "Nie udało się zsynchronizować pluginów użytkownika; uruchom :Lazy sync w lvim."
 
 ok "Pluginy użytkownika zainstalowane."
+
+if [[ -z "${GROQ_API_KEY:-}" ]]; then
+    warn "Zmienna GROQ_API_KEY nie jest ustawiona - integracja Groq nie zadziała."
+    warn "Dodaj do ~/.bashrc:  export GROQ_API_KEY=\"gsk_...\""
+fi
+
+###############################################################################
+# STEP 11: nvim-treesitter fix for Neovim >= 0.11
+###############################################################################
+
+# Musi być po synchronizacji pluginów, bo sync przywraca stary, przypięty commit.
+if [[ "$NEEDS_TS_FIX" == "1" ]]; then
+    info "Aktualizowanie nvim-treesitter do najnowszego master..."
+
+    TS_DIR="$HOME/.local/share/lunarvim/site/pack/lazy/opt/nvim-treesitter"
+
+    if [[ -d "$TS_DIR/.git" ]]; then
+        git -C "$TS_DIR" fetch --quiet origin master
+        git -C "$TS_DIR" checkout --quiet -f master
+        git -C "$TS_DIR" reset --quiet --hard origin/master
+
+        info "Aktualizowanie parserów treesitter (może chwilę potrwać)..."
+
+        "$HOME/.local/bin/lvim" \
+            --headless \
+            '+TSUpdateSync' \
+            +qa ||
+            warn "Aktualizacja parserów nie powiodła się; uruchom :TSUpdate w lvim."
+
+        ok "nvim-treesitter zaktualizowany: $(git -C "$TS_DIR" rev-parse --short HEAD)"
+    else
+        warn "Nie znaleziono ${TS_DIR}; uruchom w lvim :Lazy update nvim-treesitter oraz :TSUpdate."
+    fi
+fi
 
 ###############################################################################
 # Summary
@@ -688,6 +768,7 @@ Instalacja zakończona.
   LunarVim: ${LV_BRANCH}
   Neovim:   ${NVIM_TAG}
   Python:   ${PYTHON_VERSION}
+  Groq:     ${GROQ_MODEL}
 
 Uruchom nową sesję powłoki albo wykonaj:
 
@@ -701,18 +782,27 @@ Przydatne polecenia w LunarVim:
 
   :checkhealth
   :checkhealth provider
+  :checkhealth nvim-treesitter
+  :checkhealth codecompanion
   :Mason
 
-Claude Code w LunarVim:
+Zapis wyniku checkhealth do pliku (w lvim):
 
-  1. W terminalu uruchom raz:  claude   (zaloguj się kontem Claude lub kluczem API)
-  2. W lvim:  :ClaudeCode  lub  <Space>ac
-  3. Diagnostyka:  :checkhealth claudecode
+  :checkhealth
+  :w ~/health.txt
 
-  <Space>ac  przełącz Claude        <Space>af  fokus
-  <Space>ar  wznów sesję            <Space>aC  kontynuuj sesję
-  <Space>ab  dodaj bieżący bufor    <Space>as  (tryb visual) wyślij zaznaczenie
-  <Space>aa  akceptuj diff          <Space>ad  odrzuć diff
+Groq w LunarVim:
+
+  1. Utwórz klucz na https://console.groq.com/keys i dodaj do ~/.bashrc:
+       export GROQ_API_KEY="gsk_..."
+  2. W lvim:  :CodeCompanionChat  lub  <Space>ac
+  3. Diagnostyka:  :checkhealth codecompanion
+
+  <Space>ac  przełącz czat          <Space>aa  akcje
+  <Space>ai  prompt inline          <Space>as  (tryb visual) wyślij zaznaczenie
+
+Model zmienisz przez GROQ_MODEL przy uruchomieniu skryptu
+(lub zmienną groq_model w ~/.config/lvim/config.lua).
 
 Jeżeli codelldb nie zostanie zainstalowany automatycznie:
 
