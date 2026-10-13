@@ -1,3 +1,4 @@
+lvim --headless "+MasonInstall cmake-language-server" +qa
 VENV=/root/.local/share/lvim/mason/packages/cmake-language-server/venv
 
 "$VENV/bin/python" -m pip install 'pygls==1.3.1'
