@@ -1,6 +1,7 @@
-#!/bin/bash
+VENV=/root/.local/share/lvim/mason/packages/cmake-language-server/venv
 
-cd /root/.local/share/lvim/mason/packages/cmake-language-server
-. venv/bin/activate
-pip install "pygls<2"
+"$VENV/bin/python" -m pip install 'pygls==1.3.1'
+"$VENV/bin/python" -m pip check
 
+"$VENV/bin/python" -c \
+  "from pygls.server import LanguageServer; from cmake_language_server.server import main; print('Importy OK')"

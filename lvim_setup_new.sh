@@ -183,13 +183,6 @@ PYTHON_BIN="$PYENV_ROOT/versions/$PYTHON_VERSION/bin/python"
 "$PYTHON_BIN" -m pip install --upgrade pynvim
 pip install cmake-language-server
 
-VENV=/root/.local/share/lvim/mason/packages/cmake-language-server/venv
-
-"$VENV/bin/python" -m pip install 'pygls==1.3.1'
-"$VENV/bin/python" -m pip check
-
-"$VENV/bin/python" -c \
-  "from pygls.server import LanguageServer; from cmake_language_server.server import main; print('Importy OK')"
 
 ok "Python $PYTHON_VERSION i provider pynvim gotowe."
 
