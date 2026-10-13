@@ -123,7 +123,8 @@ sudo apt-get install -y -qq \
     clang \
     lldb \
     rr \
-    radare2
+    radare2 \
+    nasm
 ok "Zależności systemowe zainstalowane."
 
 ###############################################################################
