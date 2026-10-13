@@ -1,3 +1,4 @@
+lvim --headless "+TSInstall cmake" +qa
 lvim --headless "+MasonInstall cmake-language-server" +qa
 VENV=/root/.local/share/lvim/mason/packages/cmake-language-server/venv
 
