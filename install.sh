@@ -28,6 +28,7 @@ export APT_LISTCHANGES_FRONTEND=none
 
 LV_BRANCH="${LV_BRANCH:-}"
 NVIM_VERSION="${NVIM_VERSION:-0.11.7}"
+#NVIM_VERSION="${NVIM_VERSION:-0.12.6}"
 PYTHON_MINOR="${PYTHON_MINOR:-3.13}"
 INSTALL_FONTS="${INSTALL_FONTS:-1}"
 GROQ_MODEL="${GROQ_MODEL:-openai/gpt-oss-120b}"
@@ -567,7 +568,7 @@ local groq_model = "${GROQ_MODEL}"
 
 lvim.plugins = vim.list_extend(lvim.plugins or {}, {
   {
-    "olimorris/codecompanion.nvim",
+    {"olimorris/codecompanion.nvim", version = "^19.27.0", },
     dependencies = {
       "nvim-lua/plenary.nvim",
       "nvim-treesitter/nvim-treesitter",
